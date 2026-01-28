@@ -2,23 +2,53 @@ import streamlit as st
 import google.generativeai as genai
 from PIL import Image
 import json
+import time
 
 # ==========================================
-# [설정] 비밀 키 가져오기 (Streamlit 서버용)
+# [설정] 비밀 키 가져오기
 # ==========================================
 try:
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 except:
-    # 로컬에서 테스트할 때만 주석을 풀고 키를 넣으세요. (GitHub 올릴 땐 지우는 게 좋습니다)
     GOOGLE_API_KEY = "여기에_API_키를_넣으세요"
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # -----------------------------------------------------------
-# [모델 설정] 성능이 가장 좋은 'Gemini 1.5 Pro' 사용
+# [핵심] 실패하면 다음 모델로 자동으로 갈아타는 '오뚝이 함수'
 # -----------------------------------------------------------
-model_name = 'models/gemini-1.5-flash'
-model = genai.GenerativeModel(model_name)
+def get_response_with_fallback(prompt, image):
+    # 회원님 목록에 있는 모델 중 '성공 확률이 높은 순서'로 리스트 작성
+    # 1순위: 2.0 Lite (가벼워서 무료량이 많을 확률 높음)
+    # 2순위: 1206 실험용 (성능 좋음)
+    # 3순위: 2.5 Flash (하루 20회라도 되면 씀)
+    # 4순위: Flash Latest (최후의 수단)
+    candidate_models = [
+        'models/gemini-2.0-flash-lite-preview-02-05',
+        'models/gemini-exp-1206',
+        'models/gemini-2.5-flash',
+        'models/gemini-flash-latest'
+    ]
+
+    last_error = ""
+    
+    for model_name in candidate_models:
+        try:
+            # 모델 연결 시도
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content([prompt, image])
+            
+            # 성공하면 모델 이름과 결과를 반환하고 반복 종료
+            return response, model_name
+            
+        except Exception as e:
+            # 실패하면 에러를 기록하고 다음 모델로 넘어감
+            last_error = str(e)
+            time.sleep(1) # 1초 숨 고르기
+            continue
+            
+    # 모든 모델이 다 실패하면 에러 반환
+    raise Exception(f"모든 모델 연결 실패. 마지막 에러: {last_error}")
 
 def analyze_page(image):
     prompt = """
@@ -53,7 +83,12 @@ def analyze_page(image):
     """
     
     try:
-        response = model.generate_content([prompt, image])
+        # 위에서 만든 '오뚝이 함수'를 호출
+        response, used_model = get_response_with_fallback(prompt, image)
+        
+        # 어떤 모델이 성공했는지 로그 남기기 (디버깅용)
+        # st.toast(f"연결 성공! 사용된 모델: {used_model}") 
+        
         text = response.text.replace("```json", "").replace("```", "").strip()
         
         if not text.startswith("["):
@@ -74,7 +109,6 @@ st.set_page_config(page_title="수학과제도우미_by gfield", page_icon="📚
 st.title("📚 수학과제도우미_by gfield")
 st.caption("채점부터 오답 분석, 유사문제 추천까지 한 번에!")
 
-# 상태 저장을 위한 세션 초기화
 if 'results' not in st.session_state:
     st.session_state['results'] = None
 
@@ -104,7 +138,7 @@ if image:
     st.image(image, caption='업로드된 문제집', use_container_width=True)
     
     if st.button("🚀 채점 및 분석 시작"):
-        with st.spinner('Gemini 선생님이 채점하고 유사문제를 만들고 있습니다...'):
+        with st.spinner('AI 선생님이 최적의 모델을 찾아 연결 중입니다...'):
             st.session_state['results'] = analyze_page(image)
 
     if st.session_state['results']:
@@ -112,6 +146,7 @@ if image:
         
         if isinstance(results, dict) and "error" in results:
             st.error(f"오류 발생: {results['error']}")
+            st.warning("잠시 후 다시 시도해보세요.")
         elif isinstance(results, list):
             st.markdown("---")
             st.markdown("### 📊 채점 결과")
