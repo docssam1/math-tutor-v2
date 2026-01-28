@@ -17,7 +17,7 @@ genai.configure(api_key=GOOGLE_API_KEY)
 # -----------------------------------------------------------
 # [모델 설정] 성능이 가장 좋은 'Gemini 1.5 Pro' 사용
 # -----------------------------------------------------------
-model_name = 'models/gemini-exp-1206'
+model_name = 'models/gemini-1.5-flash'
 model = genai.GenerativeModel(model_name)
 
 def analyze_page(image):
